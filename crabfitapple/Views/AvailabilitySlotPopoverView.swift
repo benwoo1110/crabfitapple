@@ -5,6 +5,8 @@ struct AvailabilitySlotPopoverView: View {
     let availablePeople: [CrabFitPerson]
     let unavailablePeople: [CrabFitPerson]
 
+    private static let maximumPeopleListHeight: CGFloat = 260
+
     private var totalPeople: Int {
         availablePeople.count + unavailablePeople.count
     }
@@ -26,21 +28,33 @@ struct AvailabilitySlotPopoverView: View {
                 ContentUnavailableView("No People", systemImage: "person.crop.circle.badge.xmark")
                     .frame(minWidth: 220, minHeight: 140)
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(availablePeople) { person in
-                        Label(person.name, systemImage: "person.fill")
-                            .font(.body)
-                    }
+                ViewThatFits(in: .vertical) {
+                    peopleList
 
-                    ForEach(unavailablePeople) { person in
-                        Label(person.name, systemImage: "person.slash")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
+                    ScrollView {
+                        peopleList
                     }
                 }
+                .frame(maxHeight: Self.maximumPeopleListHeight, alignment: .top)
             }
         }
         .padding()
         .frame(minWidth: 240, alignment: .leading)
+    }
+
+    private var peopleList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(availablePeople) { person in
+                Label(person.name, systemImage: "person.fill")
+                    .font(.body)
+            }
+
+            ForEach(unavailablePeople) { person in
+                Label(person.name, systemImage: "person.slash")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

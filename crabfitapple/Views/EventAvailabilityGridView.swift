@@ -96,7 +96,13 @@ struct EventAvailabilityGridView: View {
     }
 
     private func orderedHourIDs(from slots: [AvailabilityGridSlot]) -> [Int] {
-        orderedUniqueValues(slots.map { hourID(for: $0.timeID) })
+        let slotHourIDs = slots.map { hourID(for: $0.timeID) }
+        guard let firstHourID = slotHourIDs.min(),
+              let lastHourID = slotHourIDs.max() else {
+            return []
+        }
+
+        return stride(from: firstHourID, through: lastHourID, by: 60).map { $0 }
     }
 
     private func slotLookup(from slots: [AvailabilityGridSlot]) -> [String: AvailabilityGridSlot] {

@@ -41,6 +41,7 @@ struct EditAvailabilitySheet: View {
     let event: CrabFitEvent
     let slots: [AvailabilityGridSlot]
     let slotDurationMinutes: Int
+    let displayTimeZoneIdentifier: String
     let onSaved: (CrabFitPerson) -> Void
 
     @State private var profileName = ""
@@ -99,12 +100,14 @@ struct EditAvailabilitySheet: View {
         slots: [AvailabilityGridSlot],
         context: AvailabilityEditorContext,
         slotDurationMinutes: Int,
+        displayTimeZoneIdentifier: String,
         preloadedAvailability: AvailabilityEditorPreloadState = .loading,
         onSaved: @escaping (CrabFitPerson) -> Void
     ) {
         self.event = event
         self.slots = slots
         self.slotDurationMinutes = slotDurationMinutes
+        self.displayTimeZoneIdentifier = displayTimeZoneIdentifier
         self.onSaved = onSaved
         self.context = context
 
@@ -260,7 +263,7 @@ struct EditAvailabilitySheet: View {
                                 AvailabilityTimeRangeRowView(
                                     range: rangeBinding,
                                     boundaries: boundaries,
-                                    timeZoneIdentifier: event.timezone
+                                    timeZoneIdentifier: displayTimeZoneIdentifier
                                 )
                                 .disabled(isSaving || isGeneratingAvailability)
                             }
@@ -394,7 +397,7 @@ struct EditAvailabilitySheet: View {
             let generatedRanges = try await naturalLanguageAvailabilityParser.ranges(
                 from: prompt,
                 boundaries: currentBoundaries,
-                timeZoneIdentifier: event.timezone
+                timeZoneIdentifier: displayTimeZoneIdentifier
             )
 
             guard !Task.isCancelled else { return }

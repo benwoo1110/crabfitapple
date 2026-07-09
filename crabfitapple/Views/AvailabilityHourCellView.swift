@@ -36,11 +36,11 @@ struct AvailabilityHourCellView: View {
                     }
                 } else {
                     Rectangle()
-                        .fill(Color.clear)
+                        .fill(Color.secondary.opacity(0.16))
                         .frame(width: 64, height: 12)
                         .overlay {
                             Rectangle()
-                                .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
+                                .stroke(Color.secondary.opacity(0.32), lineWidth: 0.5)
                         }
                         .accessibilityHidden(true)
                 }

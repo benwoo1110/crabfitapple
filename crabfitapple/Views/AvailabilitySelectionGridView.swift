@@ -48,7 +48,13 @@ struct AvailabilitySelectionGridView: View {
     }
 
     private func orderedHourIDs(from slots: [AvailabilityGridSlot]) -> [Int] {
-        orderedUniqueValues(slots.map { hourID(for: $0.timeID) })
+        let slotHourIDs = slots.map { hourID(for: $0.timeID) }
+        guard let firstHourID = slotHourIDs.min(),
+              let lastHourID = slotHourIDs.max() else {
+            return []
+        }
+
+        return stride(from: firstHourID, through: lastHourID, by: 60).map { $0 }
     }
 
     private func hourID(for timeID: Int) -> Int {
@@ -105,7 +111,9 @@ private final class AvailabilitySelectionUIKitGridView: UIView, UIScrollViewDele
     private let cornerView = UIView()
     private let selectionOverlayView = UIView()
     private let selectionBadgeLabel = UILabel()
+    #if os(iOS)
     private let haptics = UISelectionFeedbackGenerator()
+    #endif
 
     private var tapRecognizer: UITapGestureRecognizer?
     private var longPressRecognizer: UILongPressGestureRecognizer?
@@ -372,7 +380,7 @@ private final class AvailabilitySelectionUIKitGridView: UIView, UIScrollViewDele
         dragAnchorCoordinate = coordinate
         dragSelectionMode = draftSelectedRawValues.contains(slot.rawValue) ? .deselecting : .selecting
         lastDragCoordinate = nil
-        haptics.prepare()
+        prepareSelectionFeedback()
         updateDragSelection(at: location)
     }
 
@@ -622,10 +630,22 @@ private final class AvailabilitySelectionUIKitGridView: UIView, UIScrollViewDele
 
         for index in 0..<changeCount {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.018) { [weak self] in
-                self?.haptics.selectionChanged()
-                self?.haptics.prepare()
+                self?.playSelectionFeedback()
             }
         }
+    }
+
+    private func prepareSelectionFeedback() {
+        #if os(iOS)
+        haptics.prepare()
+        #endif
+    }
+
+    private func playSelectionFeedback() {
+        #if os(iOS)
+        haptics.selectionChanged()
+        haptics.prepare()
+        #endif
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -770,12 +790,16 @@ private final class AvailabilitySelectionBodyGridView: UIView {
         let strokeColor: UIColor
         let lineWidth: CGFloat
 
-        if isSelected {
+        if slot == nil {
+            fillColor = .secondarySystemGroupedBackground
+            strokeColor = .separator
+            lineWidth = AvailabilitySelectionGridDrawing.lineWidth
+        } else if isSelected {
             fillColor = tintColor.withAlphaComponent(isDisabled ? 0.34 : 0.72)
             strokeColor = tintColor
             lineWidth = 2
         } else {
-            fillColor = .secondarySystemGroupedBackground
+            fillColor = .systemBackground
             strokeColor = .separator
             lineWidth = AvailabilitySelectionGridDrawing.lineWidth
         }
@@ -1025,7 +1049,7 @@ private struct AvailabilitySelectionGridConfiguration: Equatable {
         self.segmentOffsets = segmentOffsets
 
         let dayIDs = Self.orderedUniqueValues(slots.map(\.dayID))
-        let hourIDs = Self.orderedUniqueValues(slots.map { Self.hourID(for: $0.timeID) })
+        let hourIDs = Self.continuousHourIDs(from: slots)
         self.dayIDs = dayIDs
         self.hourIDs = hourIDs
 
@@ -1119,6 +1143,16 @@ private struct AvailabilitySelectionGridConfiguration: Equatable {
 
     private static func hourID(for timeID: Int) -> Int {
         (timeID / 60) * 60
+    }
+
+    private static func continuousHourIDs(from slots: [AvailabilityGridSlot]) -> [Int] {
+        let slotHourIDs = slots.map { hourID(for: $0.timeID) }
+        guard let firstHourID = slotHourIDs.min(),
+              let lastHourID = slotHourIDs.max() else {
+            return []
+        }
+
+        return stride(from: firstHourID, through: lastHourID, by: 60).map { $0 }
     }
 
     private static func orderedUniqueValues<Value: Hashable>(_ values: [Value]) -> [Value] {

@@ -11,14 +11,14 @@ struct AvailabilitySummaryRangeRowView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "clock")
                     .imageScale(.medium)
-                    .foregroundStyle(isSelected ? Color.red : Color.orange)
+                    .foregroundStyle(isSelected ? .orange : .orange)
                     .frame(width: iconColumnWidth, alignment: .center)
                     .accessibilityHidden(true)
 
                 Text(range.detailLabel)
                     .font(.body)
                     .fontWeight(isSelected ? .bold : .regular)
-                    .foregroundStyle(isSelected ? Color.red : Color.primary)
+                    .foregroundStyle(isSelected ? .orange : .primary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 

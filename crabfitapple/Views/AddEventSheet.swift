@@ -354,7 +354,7 @@ struct AddEventSheet: View {
                 return
             }
 
-            try insertSavedEvent(eventID: event.id, name: event.name, createdDate: event.createdDate)
+            try insertSavedEvent(event)
             dismiss()
         } catch {
             showError(error.localizedDescription)
@@ -378,15 +378,15 @@ struct AddEventSheet: View {
                 return
             }
 
-            try insertSavedEvent(eventID: event.id, name: event.name, createdDate: event.createdDate)
+            try insertSavedEvent(event)
             dismiss()
         } catch {
             showError(error.localizedDescription)
         }
     }
 
-    private func insertSavedEvent(eventID: String, name: String, createdDate: Date) throws {
-        modelContext.insert(SavedEvent(eventID: eventID, name: name, createdDate: createdDate))
+    private func insertSavedEvent(_ event: CrabFitEvent) throws {
+        modelContext.insert(SavedEvent(event: event))
         try modelContext.save()
     }
 

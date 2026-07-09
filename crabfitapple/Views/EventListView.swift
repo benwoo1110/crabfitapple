@@ -29,9 +29,9 @@ struct EventListView: View {
         "\(sortField.title), \(sortOrder.title)"
     }
 
-    private var missingCreatedDateEventIDs: [String] {
+    private var missingCachedEventDataEventIDs: [String] {
         savedEvents
-            .filter { $0.createdDate == nil }
+            .filter { !$0.hasCachedEventData }
             .map(\.eventID)
             .sorted()
     }
@@ -115,8 +115,8 @@ struct EventListView: View {
             } message: {
                 Text(errorMessage)
             }
-            .task(id: missingCreatedDateEventIDs) {
-                await backfillMissingCreatedDates(for: missingCreatedDateEventIDs)
+            .task(id: missingCachedEventDataEventIDs) {
+                await backfillMissingEventData(for: missingCachedEventDataEventIDs)
             }
         } detail: {
             if let selectedEvent {
@@ -180,32 +180,32 @@ struct EventListView: View {
         isShowingAddEventSheet = true
     }
 
-    private func backfillMissingCreatedDates(for eventIDs: [String]) async {
+    private func backfillMissingEventData(for eventIDs: [String]) async {
         guard !eventIDs.isEmpty else { return }
 
         for eventID in eventIDs {
             guard !Task.isCancelled else { return }
-            guard savedEvents.contains(where: { $0.eventID == eventID && $0.createdDate == nil }) else {
+            guard savedEvents.contains(where: { $0.eventID == eventID && !$0.hasCachedEventData }) else {
                 continue
             }
 
             do {
                 let event = try await api.event(id: eventID)
                 guard !Task.isCancelled else { return }
-                saveCreatedDate(event.createdDate, for: eventID)
+                saveCachedEventData(event, for: eventID)
             } catch {
                 continue
             }
         }
     }
 
-    private func saveCreatedDate(_ createdDate: Date, for eventID: String) {
+    private func saveCachedEventData(_ event: CrabFitEvent, for eventID: String) {
         guard let savedEvent = savedEvents.first(where: { $0.eventID == eventID }),
-              savedEvent.createdDate == nil else {
+              !savedEvent.hasCachedEventData else {
             return
         }
 
-        savedEvent.createdDate = createdDate
+        savedEvent.updateCache(with: event)
 
         do {
             try modelContext.save()

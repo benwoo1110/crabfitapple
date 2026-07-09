@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -8,6 +9,7 @@ import AppKit
 struct EventDetailsView: View {
     let savedEvent: SavedEvent
 
+    @Environment(\.modelContext) private var modelContext
     @State private var event: CrabFitEvent?
     @State private var people: [CrabFitPerson] = []
     @State private var isLoading = false
@@ -28,6 +30,10 @@ struct EventDetailsView: View {
     private let api = CrabFitApi()
     private let eventDurationMinutes = 60
     private let slotDurationMinutes = 15
+
+    private var localTimeZoneIdentifier: String {
+        TimeZone.current.identifier
+    }
 
     private static let eventContentAnimation = Animation.easeInOut(duration: 0.24)
     private static let availabilityUpdateAnimation = Animation.easeInOut(duration: 0.22)
@@ -61,7 +67,7 @@ struct EventDetailsView: View {
                     }
 
                     Section("Availability Map") {
-                        if people.isEmpty {
+                        if people.isEmpty && !isLoading {
                             Text("No availability responses yet.")
                                 .foregroundStyle(.secondary)
                         }
@@ -79,27 +85,15 @@ struct EventDetailsView: View {
                     }
 
                     Section("Most Common Availability") {
-                        if people.isEmpty {
+                        if people.isEmpty && !isLoading {
                             Text("No availability responses yet.")
                                 .foregroundStyle(.secondary)
-                        } else if availabilitySummaryRanges.isEmpty {
+                        } else if !people.isEmpty && availabilitySummaryRanges.isEmpty {
                             Text("No common availability yet.")
                                 .foregroundStyle(.secondary)
-                        } else {
+                        } else if !people.isEmpty {
                             ForEach(availabilitySummaryRanges) { range in
-                                let isSelected = selectedAvailabilityRangeID == range.id
-
-                                Button {
-                                    toggleAvailabilityRangeSelection(range)
-                                } label: {
-                                    AvailabilitySummaryRangeRowView(
-                                        range: range,
-                                        isSelected: isSelected
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .listRowBackground(isSelected ? Color.red.opacity(0.12) : nil)
-                                .accessibilityHint("Highlights this range in the availability map")
+                                availabilitySummaryRangeButton(for: range)
                             }
                         }
                     }
@@ -165,6 +159,7 @@ struct EventDetailsView: View {
                     slots: availabilityGridSlots,
                     context: availabilityEditorContext,
                     slotDurationMinutes: slotDurationMinutes,
+                    displayTimeZoneIdentifier: localTimeZoneIdentifier,
                     preloadedAvailability: availabilityEditorPreloadState,
                     onSaved: availabilityEditorSaved
                 )
@@ -197,7 +192,7 @@ struct EventDetailsView: View {
     }
 
     private func availabilityEditorSaved(_ updatedPerson: CrabFitPerson) {
-        guard let event else { return }
+        guard event != nil else { return }
 
         let updatedPeople = sortedPeople(peopleByUpdating(updatedPerson, in: people))
         let updatedAvailabilityByPerson = availabilityByPerson(for: updatedPeople)
@@ -206,7 +201,7 @@ struct EventDetailsView: View {
             from: availabilityGridSlots,
             people: updatedPeople,
             availabilityByPerson: updatedAvailabilityByPerson,
-            timeZoneIdentifier: event.timezone
+            timeZoneIdentifier: localTimeZoneIdentifier
         )
 
         withAnimation(Self.availabilityUpdateAnimation) {
@@ -244,6 +239,23 @@ struct EventDetailsView: View {
         }
     }
 
+    private func availabilitySummaryRangeButton(for range: AvailabilitySummaryRange) -> some View {
+        let isSelected = selectedAvailabilityRangeID == range.id
+        let rowBackground: Color? = isSelected ? Color.orange.opacity(0.22) : nil
+
+        return Button {
+            toggleAvailabilityRangeSelection(range)
+        } label: {
+            AvailabilitySummaryRangeRowView(
+                range: range,
+                isSelected: isSelected
+            )
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(rowBackground)
+        .accessibilityHint("Highlights this range in the availability map")
+    }
+
     private func loadEvent() async {
         let eventID = savedEvent.eventID
         let isChangingEvent = event?.id != eventID
@@ -274,7 +286,30 @@ struct EventDetailsView: View {
         }
 
         do {
-            let fetchedEvent = try await api.event(id: eventID)
+            let loadedEvent: CrabFitEvent
+
+            if let cachedEvent = savedEvent.cachedEvent {
+                loadedEvent = cachedEvent
+            } else {
+                loadedEvent = try await api.event(id: eventID)
+                guard !Task.isCancelled, loadingEventID == eventID else { return }
+                saveCachedEventDataIfNeeded(loadedEvent)
+            }
+
+            let displayTimeZoneIdentifier = localTimeZoneIdentifier
+            let loadedGridSlots = availabilitySlots(for: loadedEvent)
+            let loadedAvailabilityEditorContext = AvailabilityEditorContext(
+                slots: loadedGridSlots,
+                durationMinutes: slotDurationMinutes,
+                timeZoneIdentifier: displayTimeZoneIdentifier
+            )
+
+            guard !Task.isCancelled, loadingEventID == eventID else { return }
+
+            event = loadedEvent
+            availabilityGridSlots = loadedGridSlots
+            availabilityEditorContext = loadedAvailabilityEditorContext
+
             let fetchedPeople: [CrabFitPerson]
             let fetchedErrorMessage: String?
 
@@ -289,25 +324,16 @@ struct EventDetailsView: View {
             let sortedFetchedPeople = sortedPeople(fetchedPeople)
             let fetchedAvailabilityByPerson = availabilityByPerson(for: sortedFetchedPeople)
             let fetchedAvailabilityCountByRawValue = availabilityCountByRawValue(for: sortedFetchedPeople)
-            let fetchedGridSlots = availabilitySlots(for: fetchedEvent)
-            let fetchedAvailabilityEditorContext = AvailabilityEditorContext(
-                slots: fetchedGridSlots,
-                durationMinutes: slotDurationMinutes,
-                timeZoneIdentifier: fetchedEvent.timezone
-            )
             let fetchedSummaryRanges = mostAvailableRanges(
-                from: fetchedGridSlots,
+                from: loadedGridSlots,
                 people: sortedFetchedPeople,
                 availabilityByPerson: fetchedAvailabilityByPerson,
-                timeZoneIdentifier: fetchedEvent.timezone
+                timeZoneIdentifier: displayTimeZoneIdentifier
             )
 
             guard !Task.isCancelled, loadingEventID == eventID else { return }
 
-            event = fetchedEvent
             people = sortedFetchedPeople
-            availabilityGridSlots = fetchedGridSlots
-            availabilityEditorContext = fetchedAvailabilityEditorContext
             availabilityByPerson = fetchedAvailabilityByPerson
             availabilityCountByRawValue = fetchedAvailabilityCountByRawValue
             availabilitySummaryRanges = fetchedSummaryRanges
@@ -315,14 +341,26 @@ struct EventDetailsView: View {
             errorMessage = fetchedErrorMessage
 
             preloadAvailabilityEditor(
-                for: fetchedEvent,
+                for: loadedEvent,
                 people: sortedFetchedPeople,
-                context: fetchedAvailabilityEditorContext
+                context: loadedAvailabilityEditorContext
             )
         } catch {
             guard !Task.isCancelled, loadingEventID == eventID else { return }
 
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveCachedEventDataIfNeeded(_ event: CrabFitEvent) {
+        guard savedEvent.cachedEvent != event else { return }
+
+        savedEvent.updateCache(with: event)
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
         }
     }
 
@@ -573,7 +611,7 @@ struct EventDetailsView: View {
         .compactMap { rawValue in
             AvailabilityGridSlot(
                 rawValue: rawValue,
-                timeZoneIdentifier: event.timezone,
+                timeZoneIdentifier: localTimeZoneIdentifier,
                 durationMinutes: slotDurationMinutes
             )
         }
