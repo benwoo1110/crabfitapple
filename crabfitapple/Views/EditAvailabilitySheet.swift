@@ -355,7 +355,11 @@ struct EditAvailabilitySheet: View {
                 syncSelectedRawValuesFromRanges()
             }
             .task {
+                let shouldPrewarmAfterTask = loadState != .loading
                 await loadAvailabilityIfNeeded()
+                if shouldPrewarmAfterTask {
+                    prewarmAvailabilityParserIfReady()
+                }
             }
         }
         .interactiveDismissDisabled(isInteractiveDismissDisabled)
@@ -397,6 +401,7 @@ struct EditAvailabilitySheet: View {
             let generatedRanges = try await naturalLanguageAvailabilityParser.ranges(
                 from: prompt,
                 boundaries: currentBoundaries,
+                rangeSlots: context.rangeSlots,
                 timeZoneIdentifier: displayTimeZoneIdentifier
             )
 
@@ -468,6 +473,16 @@ struct EditAvailabilitySheet: View {
         self.profilePassword = profilePassword
         applySelection(selection)
         loadState = .ready
+        prewarmAvailabilityParserIfReady()
+    }
+
+    private func prewarmAvailabilityParserIfReady() {
+        guard boundaries.count >= 2, !context.rangeSlots.isEmpty else { return }
+
+        naturalLanguageAvailabilityParser.prewarm(
+            boundaries: boundaries,
+            timeZoneIdentifier: displayTimeZoneIdentifier
+        )
     }
 
     private func saveButtonTapped() {

@@ -11,15 +11,13 @@ final class NaturalLanguageAvailabilityParser {
     ) {
         guard boundaries.count >= 2 else { return }
 
-        foundationModelAvailabilityParser.prewarm(
-            boundaries: boundaries,
-            timeZoneIdentifier: timeZoneIdentifier
-        )
+        foundationModelAvailabilityParser.prewarm(timeZoneIdentifier: timeZoneIdentifier)
     }
 
     func ranges(
         from prompt: String,
         boundaries: [AvailabilityRangeBoundary],
+        rangeSlots: [AvailabilityRangeSlot],
         timeZoneIdentifier: String
     ) async throws -> [AvailabilityEditRange] {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,13 +25,13 @@ final class NaturalLanguageAvailabilityParser {
             throw NaturalLanguageAvailabilityParserError.emptyPrompt
         }
 
-        guard boundaries.count >= 2 else {
+        guard boundaries.count >= 2, !rangeSlots.isEmpty else {
             throw NaturalLanguageAvailabilityParserError.noAvailableBoundaries
         }
 
         return try await foundationModelAvailabilityParser.ranges(
             from: trimmedPrompt,
-            boundaries: boundaries,
+            rangeSlots: rangeSlots,
             timeZoneIdentifier: timeZoneIdentifier
         )
     }
@@ -65,21 +63,16 @@ enum NaturalLanguageAvailabilityParserError: LocalizedError {
     }
 }
 
+@MainActor
 private final class FoundationModelAvailabilityParser {
     private var prewarmedSession: LanguageModelSession?
     private var prewarmedContext: AvailabilityPromptContext?
 
-    func prewarm(
-        boundaries: [AvailabilityRangeBoundary],
-        timeZoneIdentifier: String
-    ) {
+    func prewarm(timeZoneIdentifier: String) {
         let model = SystemLanguageModel.default
         guard model.isAvailable else { return }
 
-        let context = Self.promptContext(
-            boundaries: boundaries,
-            timeZoneIdentifier: timeZoneIdentifier
-        )
+        let context = Self.promptContext(timeZoneIdentifier: timeZoneIdentifier)
         let session = LanguageModelSession(model: model, instructions: Self.instructions)
         prewarmedSession = session
         prewarmedContext = context
@@ -88,7 +81,7 @@ private final class FoundationModelAvailabilityParser {
 
     func ranges(
         from prompt: String,
-        boundaries: [AvailabilityRangeBoundary],
+        rangeSlots: [AvailabilityRangeSlot],
         timeZoneIdentifier: String
     ) async throws -> [AvailabilityEditRange] {
         let model = SystemLanguageModel.default
@@ -98,10 +91,7 @@ private final class FoundationModelAvailabilityParser {
             )
         }
 
-        let context = Self.promptContext(
-            boundaries: boundaries,
-            timeZoneIdentifier: timeZoneIdentifier
-        )
+        let context = Self.promptContext(timeZoneIdentifier: timeZoneIdentifier)
         let session = session(for: model, context: context)
         defer {
             prewarmedSession = nil
@@ -112,12 +102,14 @@ private final class FoundationModelAvailabilityParser {
             let response = try await session.respond(
                 to: Self.prompt(for: prompt, context: context),
                 generating: GeneratedAvailabilityResponse.self,
-                options: GenerationOptions(samplingMode: .greedy)
+                options: GenerationOptions(samplingMode: .random(top: 5, seed: 91827397), temperature: 0.5)
             )
 
-            return try validatedRanges(
-                from: response.content.ranges,
-                boundaries: boundaries,
+            print(response.content.rules)
+
+            return try editRanges(
+                from: response.content.rules,
+                rangeSlots: rangeSlots,
                 timeZoneIdentifier: timeZoneIdentifier
             )
         } catch let error as NaturalLanguageAvailabilityParserError {
@@ -133,6 +125,8 @@ private final class FoundationModelAvailabilityParser {
     ) -> LanguageModelSession {
         if prewarmedContext == context,
            let prewarmedSession {
+            self.prewarmedSession = nil
+            prewarmedContext = nil
             return prewarmedSession
         }
 
@@ -141,29 +135,29 @@ private final class FoundationModelAvailabilityParser {
 
     private static var instructions: String {
         """
-        Convert availability text for one Crab Fit event into day codes and local minutes.
-        Use only day codes and time codes from the prompt. Times are minutes after midnight, end exclusive.
-        Do not calculate times. Select startMinute and endMinute from the times list.
-        Weekdays means Monday-Friday. Weekend means Saturday-Sunday. Named days match the wd field.
-        Use first-last only when the request says all day/anytime or has no time.
-        "From", "after", or "onwards" with no end means start-last. "Until", "before", or "up to" with no start means first-end.
-        If the request has explicit times, you must use those times, not first-last.
-        If an exact requested time is not in the times list, omit that range.
-        Examples: "Monday 10 to 12 noon" => Monday code, startMinute 600, endMinute 720. "2pm onwards Monday" => Monday code, startMinute 840, endMinute last. "anytime weekend" => Saturday/Sunday codes, first-last.
-        Return compact ranges; group multiple dayCodes only when they share the same startMinute and endMinute.
+        Extract the user's intended availability rules as local date and time data only.
+        Do not use or infer any event details. Do not decide whether a date or time is valid for an event.
+        Use include for available time and exclude for exception phrases such as except, excluding, but not, unavailable, or not.
+        For "every day except Friday 1pm-3pm", return an include everyday rule and then an exclude Friday rule.
+        Targets are everyday, weekday, weekend, a named weekday target, or specificDate.
+        Return the minimum number of rules needed. Do not expand everyday into weekday, weekend, named weekdays, or specificDate rules.
+        Use named weekday targets only for named weekdays. Use specificDate only for explicit or relative calendar dates.
+        Resolve relative dates with the provided today value and timezone.
+        Times are local 24-hour clock times with hour and minute fields. 3pm is hour 15 minute 0.
+        Use 00:00 for start of day and 24:00 for end of day.
+        If no time is stated, use 00:00 to 24:00. "After 2pm" means 14:00 to 24:00. "Any day after 3pm" means one everyday rule from 15:00 to 24:00. "Before noon" means 00:00 to 12:00.
+        Split overnight ranges into two same-day rules, such as Monday 22:00-24:00 and Tuesday 00:00-02:00.
+        Preserve the rule order needed to apply includes and excludes correctly.
         """
     }
 
-    private static func promptContext(
-        boundaries: [AvailabilityRangeBoundary],
-        timeZoneIdentifier: String
-    ) -> AvailabilityPromptContext {
+    private static func promptContext(timeZoneIdentifier: String) -> AvailabilityPromptContext {
         let timeZone = TimeZone(identifier: timeZoneIdentifier) ?? Self.utcTimeZone
+        let today = dateFormatter(timeZone: timeZone).string(from: Date())
+
         return AvailabilityPromptContext(
             timeZoneIdentifier: timeZoneIdentifier,
-            boundaryMode: Self.eventBoundaryMode(for: boundaries),
-            timeSummary: Self.timeSummaryLine(for: boundaries, timeZone: timeZone),
-            daySummary: Self.daySummaryLines(for: boundaries, timeZone: timeZone)
+            today: today
         )
     }
 
@@ -175,223 +169,154 @@ private final class FoundationModelAvailabilityParser {
     }
 
     private static func promptPrefix(for context: AvailabilityPromptContext) -> String {
-        return """
+        """
         tz=\(context.timeZoneIdentifier)
-        mode=\(context.boundaryMode)
-        times:
-        \(context.timeSummary)
-        days:
-        \(context.daySummary)
+        today=\(context.today)
         """
     }
 
-    private static func eventBoundaryMode(for boundaries: [AvailabilityRangeBoundary]) -> String {
-        let hasWeekdayBoundaries = boundaries.contains { $0.usesWeekdayLabel }
-        let hasSpecificDateBoundaries = boundaries.contains { !$0.usesWeekdayLabel }
-
-        switch (hasWeekdayBoundaries, hasSpecificDateBoundaries) {
-        case (true, true):
-            return "mixed recurring weekdays and specific dates"
-        case (true, false):
-            return "recurring weekdays"
-        case (false, true):
-            return "specific calendar dates"
-        case (false, false):
-            return "empty"
-        }
-    }
-
-    private static func daySummaryLines(
-        for boundaries: [AvailabilityRangeBoundary],
-        timeZone: TimeZone
-    ) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        var summariesByDayKey: [String: BoundaryPromptDaySummary] = [:]
-
-        for boundary in boundaries {
-            let components = calendar.dateComponents([.year, .month, .day, .weekday], from: boundary.date)
-            guard let weekday = components.weekday else { continue }
-
-            let weekdayIndex = weekday - 1
-            let weekdayText = weekdayFormatter(timeZone: timeZone).string(from: boundary.date)
-            let time24 = time24Formatter(timeZone: timeZone).string(from: boundary.date)
-            let timeMinute = timeMinute(for: boundary.date, timeZone: timeZone)
-            let dayKey: String
-            let type: String
-            let dateText: String?
-            let daySortValue: TimeInterval
-
-            if boundary.usesWeekdayLabel {
-                dayKey = "w\(weekdayIndex)"
-                type = "recurring-weekday"
-                dateText = nil
-                daySortValue = TimeInterval(weekdayIndex)
-            } else {
-                guard let year = components.year,
-                      let month = components.month,
-                      let day = components.day,
-                      let dayStart = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
-                    continue
-                }
-
-                dayKey = String(format: "d%04d%02d%02d", year, month, day)
-                type = "specific-date"
-                dateText = dateFormatter(timeZone: timeZone).string(from: boundary.date)
-                daySortValue = dayStart.timeIntervalSinceReferenceDate
-            }
-
-            if var summary = summariesByDayKey[dayKey] {
-                summary.lastMinute = timeMinute
-                summary.lastTime24 = time24
-                summariesByDayKey[dayKey] = summary
-            } else {
-                summariesByDayKey[dayKey] = BoundaryPromptDaySummary(
-                    dayKey: dayKey,
-                    type: type,
-                    dateText: dateText,
-                    weekdayText: weekdayText,
-                    weekdayIndex: weekdayIndex,
-                    daySortValue: daySortValue,
-                    firstMinute: timeMinute,
-                    firstTime24: time24,
-                    lastMinute: timeMinute,
-                    lastTime24: time24
-                )
-            }
-        }
-
-        let lines = summariesByDayKey.values
-            .sorted { $0.daySortValue < $1.daySortValue }
-            .map(\.line)
-
-        return lines.isEmpty ? "none" : lines.joined(separator: "\n")
-    }
-
-    private static func timeSummaryLine(
-        for boundaries: [AvailabilityRangeBoundary],
-        timeZone: TimeZone
-    ) -> String {
-        let timeMinutes = Set(boundaries.map { timeMinute(for: $0.date, timeZone: timeZone) })
-
-        let timeParts = timeMinutes.sorted().map { minute in
-            "\(minute)=\(time24Text(for: minute))\(timeAlias(for: minute))"
-        }
-
-        return timeParts.isEmpty ? "none" : timeParts.joined(separator: " ")
-    }
-
-    private func validatedRanges(
-        from generatedRanges: [GeneratedAvailabilityRange],
-        boundaries: [AvailabilityRangeBoundary],
+    private func editRanges(
+        from generatedRules: [GeneratedAvailabilityRule],
+        rangeSlots: [AvailabilityRangeSlot],
         timeZoneIdentifier: String
     ) throws -> [AvailabilityEditRange] {
-        let boundaryByID = Dictionary(uniqueKeysWithValues: boundaries.map { ($0.id, $0) })
-        let placements = boundaryPlacements(
-            for: boundaries,
+        let rules = Self.normalizedRules(from: generatedRules.compactMap(AvailabilityRule.init(generatedRule:)))
+        guard !rules.isEmpty else {
+            throw NaturalLanguageAvailabilityParserError.invalidGeneratedRanges
+        }
+
+        return try editRanges(
+            from: rules,
+            rangeSlots: rangeSlots,
             timeZoneIdentifier: timeZoneIdentifier
         )
-        let boundaryIndexByDayAndMinute = Dictionary(
-            uniqueKeysWithValues: placements.values.map { placement in
-                ("\(placement.dayKey)|\(placement.timeMinute)", placement.index)
-            }
-        )
-        var seenRangeKeys: Set<String> = []
-        var editRanges: [AvailabilityEditRange] = []
-
-        for generatedRange in generatedRanges {
-            guard (0...Self.minutesPerDay).contains(generatedRange.startMinute),
-                  (0...Self.minutesPerDay).contains(generatedRange.endMinute),
-                  generatedRange.startMinute < generatedRange.endMinute else {
-                continue
-            }
-
-            for rawDayCode in generatedRange.dayCodes {
-                let dayCode = rawDayCode.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !dayCode.isEmpty,
-                      let startIndex = boundaryIndexByDayAndMinute["\(dayCode)|\(generatedRange.startMinute)"],
-                      let endIndex = boundaryIndexByDayAndMinute["\(dayCode)|\(generatedRange.endMinute)"] else {
-                    continue
-                }
-
-                let startBoundary = boundaries[startIndex]
-                let endBoundary = boundaries[endIndex]
-                guard startBoundary.sortValue < endBoundary.sortValue else {
-                    continue
-                }
-
-                let rangeKey = "\(startIndex)|\(endIndex)"
-                guard seenRangeKeys.insert(rangeKey).inserted else { continue }
-
-                editRanges.append(AvailabilityEditRange(
-                    startBoundaryID: startBoundary.id,
-                    endBoundaryID: endBoundary.id
-                ))
-            }
-        }
-
-        guard !editRanges.isEmpty else {
-            throw NaturalLanguageAvailabilityParserError.noMatchingRanges
-        }
-
-        return editRanges.sorted { firstRange, secondRange in
-            guard let firstBoundary = boundaryByID[firstRange.startBoundaryID],
-                  let secondBoundary = boundaryByID[secondRange.startBoundaryID] else {
-                return false
-            }
-
-            return firstBoundary.sortValue < secondBoundary.sortValue
-        }
     }
 
-    private func boundaryPlacements(
-        for boundaries: [AvailabilityRangeBoundary],
+    private func editRanges(
+        from rules: [AvailabilityRule],
+        rangeSlots: [AvailabilityRangeSlot],
         timeZoneIdentifier: String
-    ) -> [Int: BoundaryPlacement] {
+    ) throws -> [AvailabilityEditRange] {
+        let rules = Self.normalizedRules(from: rules)
+        guard !rules.isEmpty else {
+            throw NaturalLanguageAvailabilityParserError.invalidGeneratedRanges
+        }
+
         let timeZone = TimeZone(identifier: timeZoneIdentifier) ?? Self.utcTimeZone
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
 
-        return Dictionary(uniqueKeysWithValues: boundaries.enumerated().compactMap { index, boundary in
-            let components = calendar.dateComponents([.year, .month, .day, .weekday, .hour, .minute], from: boundary.date)
-            guard let hour = components.hour,
-                  let minute = components.minute else {
-                return nil
+        var selectedRawValues = Set<String>()
+
+        for rule in rules {
+            for slot in rangeSlots where Self.rule(rule, matches: slot, calendar: calendar) {
+                switch rule.mode {
+                case .include:
+                    selectedRawValues.insert(slot.rawValue)
+                case .exclude:
+                    selectedRawValues.remove(slot.rawValue)
+                }
+            }
+        }
+
+        let selectedSlots = rangeSlots
+            .filter { selectedRawValues.contains($0.rawValue) }
+            .sorted { firstSlot, secondSlot in
+                firstSlot.startSortValue < secondSlot.startSortValue
             }
 
-            let timeMinute = hour * 60 + minute
+        let editRanges = Self.editRanges(from: selectedSlots)
+        guard !editRanges.isEmpty else {
+            throw NaturalLanguageAvailabilityParserError.noMatchingRanges
+        }
 
-            if boundary.usesWeekdayLabel {
-                guard let weekday = components.weekday else { return nil }
-                let weekdayIndex = weekday - 1
-                return (
-                    index,
-                    BoundaryPlacement(
-                        index: index,
-                        dayKey: "w\(weekdayIndex)",
-                        daySortValue: TimeInterval(weekdayIndex),
-                        timeMinute: timeMinute
-                    )
-                )
+        return editRanges
+    }
+
+    private static func normalizedRules(from rules: [AvailabilityRule]) -> [AvailabilityRule] {
+        var normalizedRules: [AvailabilityRule] = []
+
+        for rule in rules {
+            guard !normalizedRules.contains(rule) else { continue }
+
+            if rule.isEverydayInclude {
+                normalizedRules.removeAll { existingRule in
+                    existingRule.isInclude
+                        && existingRule.startMinute == rule.startMinute
+                        && existingRule.endMinute == rule.endMinute
+                        && existingRule.target.isCoveredByEveryday
+                }
+                normalizedRules.append(rule)
+                continue
             }
 
-            guard let year = components.year,
-                  let month = components.month,
-                  let day = components.day,
-                  let dayStart = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
-                return nil
-            }
+            let isCoveredByExistingEverydayRule = rule.isInclude
+                && rule.target.isCoveredByEveryday
+                && normalizedRules.contains { existingRule in
+                    existingRule.isEverydayInclude
+                        && existingRule.startMinute == rule.startMinute
+                        && existingRule.endMinute == rule.endMinute
+                }
 
-            return (
-                index,
-                BoundaryPlacement(
-                    index: index,
-                    dayKey: String(format: "d%04d%02d%02d", year, month, day),
-                    daySortValue: dayStart.timeIntervalSinceReferenceDate,
-                    timeMinute: timeMinute
-                )
-            )
-        })
+            if !isCoveredByExistingEverydayRule {
+                normalizedRules.append(rule)
+            }
+        }
+
+        return normalizedRules
+    }
+
+    private static func rule(
+        _ rule: AvailabilityRule,
+        matches slot: AvailabilityRangeSlot,
+        calendar: Calendar
+    ) -> Bool {
+        guard let localSlot = LocalAvailabilitySlot(slot: slot, calendar: calendar),
+              rule.target.matches(localSlot),
+              localSlot.startMinute >= rule.startMinute,
+              localSlot.endMinute <= rule.endMinute else {
+            return false
+        }
+
+        return true
+    }
+
+    private static func editRanges(from selectedSlots: [AvailabilityRangeSlot]) -> [AvailabilityEditRange] {
+        guard let firstSlot = selectedSlots.first else { return [] }
+
+        var editRanges: [AvailabilityEditRange] = []
+        var rangeStartSlot = firstSlot
+        var previousSlot = firstSlot
+
+        for slot in selectedSlots.dropFirst() {
+            if areSlotsContinuous(previousSlot, slot) {
+                previousSlot = slot
+            } else {
+                editRanges.append(editRange(from: rangeStartSlot, through: previousSlot))
+                rangeStartSlot = slot
+                previousSlot = slot
+            }
+        }
+
+        editRanges.append(editRange(from: rangeStartSlot, through: previousSlot))
+        return editRanges
+    }
+
+    private static func editRange(
+        from startSlot: AvailabilityRangeSlot,
+        through endSlot: AvailabilityRangeSlot
+    ) -> AvailabilityEditRange {
+        AvailabilityEditRange(
+            startBoundaryID: startSlot.startBoundaryID,
+            endBoundaryID: endSlot.endBoundaryID
+        )
+    }
+
+    private static func areSlotsContinuous(
+        _ firstSlot: AvailabilityRangeSlot,
+        _ secondSlot: AvailabilityRangeSlot
+    ) -> Bool {
+        abs(secondSlot.startSortValue - firstSlot.endSortValue) < 0.5
     }
 
     private func availabilityMessage(for availability: SystemLanguageModel.Availability) -> String {
@@ -414,47 +339,8 @@ private final class FoundationModelAvailabilityParser {
         }
     }
 
-    private static func timeMinute(for date: Date, timeZone: TimeZone) -> Int {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let components = calendar.dateComponents([.hour, .minute], from: date)
-        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
-    }
-
-    private static func time24Text(for minute: Int) -> String {
-        String(format: "%02d:%02d", minute / 60, minute % 60)
-    }
-
-    private static func timeAlias(for minute: Int) -> String {
-        switch minute {
-        case 0:
-            return "/midnight"
-        case 720:
-            return "/noon"
-        default:
-            let hour24 = minute / 60
-            let minuteOfHour = minute % 60
-            let period = hour24 < 12 ? "am" : "pm"
-            let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-
-            if minuteOfHour == 0 {
-                return "/\(hour12)\(period)"
-            }
-
-            return String(format: "/%d:%02d%@", hour12, minuteOfHour, period)
-        }
-    }
-
     private static func dateFormatter(timeZone: TimeZone) -> DateFormatter {
         formatter(dateFormat: "yyyy-MM-dd", timeZone: timeZone)
-    }
-
-    private static func weekdayFormatter(timeZone: TimeZone) -> DateFormatter {
-        formatter(dateFormat: "EEEE", timeZone: timeZone)
-    }
-
-    private static func time24Formatter(timeZone: TimeZone) -> DateFormatter {
-        formatter(dateFormat: "HH:mm", timeZone: timeZone)
     }
 
     private static func formatter(dateFormat: String, timeZone: TimeZone) -> DateFormatter {
@@ -468,71 +354,267 @@ private final class FoundationModelAvailabilityParser {
     private static var utcTimeZone: TimeZone {
         TimeZone(identifier: "UTC") ?? .current
     }
-
-    private static let minutesPerDay = 1_440
-}
-
-private struct BoundaryPlacement {
-    let index: Int
-    let dayKey: String
-    let daySortValue: TimeInterval
-    let timeMinute: Int
 }
 
 private struct AvailabilityPromptContext: Equatable {
     let timeZoneIdentifier: String
-    let boundaryMode: String
-    let timeSummary: String
-    let daySummary: String
+    let today: String
 }
 
-private struct BoundaryPromptDaySummary {
-    let dayKey: String
-    let type: String
-    let dateText: String?
-    let weekdayText: String
+private struct LocalAvailabilitySlot {
+    let usesWeekdayLabel: Bool
+    let year: Int
+    let month: Int
+    let day: Int
     let weekdayIndex: Int
-    let daySortValue: TimeInterval
-    let firstMinute: Int
-    let firstTime24: String
-    var lastMinute: Int
-    var lastTime24: String
+    let startMinute: Int
+    let endMinute: Int
 
-    var line: String {
-        var parts = [
-            "code=\(dayKey)",
-            "type=\(type)"
-        ]
-
-        if let dateText {
-            parts.append("date=\(dateText)")
+    init?(slot: AvailabilityRangeSlot, calendar: Calendar) {
+        let startComponents = calendar.dateComponents([.year, .month, .day, .weekday], from: slot.startDate)
+        guard let year = startComponents.year,
+              let month = startComponents.month,
+              let day = startComponents.day,
+              let weekday = startComponents.weekday else {
+            return nil
         }
 
-        parts += [
-            "wd=\(weekdayText)",
-            "wi=\(weekdayIndex)",
-            "first=\(firstMinute)(\(firstTime24))",
-            "last=\(lastMinute)(\(lastTime24))"
-        ]
+        let dayStart = calendar.startOfDay(for: slot.startDate)
+        let startMinute = Int((slot.startDate.timeIntervalSince(dayStart) / 60).rounded())
+        let endMinute = Int((slot.endDate.timeIntervalSince(dayStart) / 60).rounded())
 
-        return parts.joined(separator: " ")
+        guard (0...Self.minutesPerDay).contains(startMinute),
+              (0...Self.minutesPerDay).contains(endMinute),
+              startMinute < endMinute else {
+            return nil
+        }
+
+        self.usesWeekdayLabel = slot.usesWeekdayLabel
+        self.year = year
+        self.month = month
+        self.day = day
+        weekdayIndex = weekday - 1
+        self.startMinute = startMinute
+        self.endMinute = endMinute
+    }
+
+    private static let minutesPerDay = 1_440
+}
+
+private struct AvailabilityRule: Equatable {
+    let mode: AvailabilityRuleMode
+    let target: AvailabilityRuleTarget
+    let startMinute: Int
+    let endMinute: Int
+
+    init?(generatedRule: GeneratedAvailabilityRule) {
+        guard let startMinute = generatedRule.startTime.minuteAfterMidnight,
+              let endMinute = generatedRule.endTime.minuteAfterMidnight else {
+            return nil
+        }
+
+        guard let mode = AvailabilityRuleMode(generatedMode: generatedRule.mode),
+              let target = AvailabilityRuleTarget(generatedRule: generatedRule),
+              startMinute < endMinute else {
+            return nil
+        }
+
+        self.mode = mode
+        self.target = target
+        self.startMinute = startMinute
+        self.endMinute = endMinute
+    }
+
+    var isInclude: Bool {
+        mode == .include
+    }
+
+    var isEverydayInclude: Bool {
+        isInclude && target == .everyday
+    }
+}
+
+private enum AvailabilityRuleMode: Equatable {
+    case include
+    case exclude
+
+    init?(generatedMode: GeneratedAvailabilityRuleMode) {
+        switch generatedMode {
+        case .include:
+            self = .include
+        case .exclude:
+            self = .exclude
+        @unknown default:
+            return nil
+        }
+    }
+}
+
+private enum AvailabilityRuleTarget: Equatable {
+    case everyday
+    case weekdays
+    case weekend
+    case dayOfWeek(Int)
+    case specificDate(year: Int, month: Int, day: Int)
+
+    init?(generatedRule: GeneratedAvailabilityRule) {
+        switch generatedRule.target {
+        case .everyday:
+            self = .everyday
+        case .weekday:
+            self = .weekdays
+        case .weekend:
+            self = .weekend
+        case .sunday:
+            self = .dayOfWeek(0)
+        case .monday:
+            self = .dayOfWeek(1)
+        case .tuesday:
+            self = .dayOfWeek(2)
+        case .wednesday:
+            self = .dayOfWeek(3)
+        case .thursday:
+            self = .dayOfWeek(4)
+        case .friday:
+            self = .dayOfWeek(5)
+        case .saturday:
+            self = .dayOfWeek(6)
+        case .specificDate:
+            guard let date = Self.specificDate(from: generatedRule.specificDate) else { return nil }
+            self = .specificDate(year: date.year, month: date.month, day: date.day)
+        @unknown default:
+            return nil
+        }
+    }
+
+    func matches(_ slot: LocalAvailabilitySlot) -> Bool {
+        switch self {
+        case .everyday:
+            true
+        case .weekdays:
+            (1...5).contains(slot.weekdayIndex)
+        case .weekend:
+            slot.weekdayIndex == 0 || slot.weekdayIndex == 6
+        case .dayOfWeek(let weekdayIndex):
+            slot.weekdayIndex == weekdayIndex
+        case .specificDate(let year, let month, let day):
+            !slot.usesWeekdayLabel && slot.year == year && slot.month == month && slot.day == day
+        }
+    }
+
+    private static func specificDate(from generatedDate: GeneratedSpecificDate?) -> (year: Int, month: Int, day: Int)? {
+        guard let generatedDate,
+              Self.isValidDate(
+                  year: generatedDate.year,
+                  month: generatedDate.month,
+                  day: generatedDate.day
+              ) else {
+            return nil
+        }
+
+        return (generatedDate.year, generatedDate.month, generatedDate.day)
+    }
+
+    private static func isValidDate(year: Int, month: Int, day: Int) -> Bool {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(identifier: "UTC") ?? .current
+        components.year = year
+        components.month = month
+        components.day = day
+
+        guard let date = components.date,
+              let normalizedComponents = components.calendar?.dateComponents([.year, .month, .day], from: date) else {
+            return false
+        }
+
+        return normalizedComponents.year == year
+            && normalizedComponents.month == month
+            && normalizedComponents.day == day
+    }
+
+    var isCoveredByEveryday: Bool {
+        switch self {
+        case .everyday, .weekdays, .weekend, .dayOfWeek:
+            true
+        case .specificDate:
+            false
+        }
     }
 }
 
 @Generable
 private struct GeneratedAvailabilityResponse {
-    @Guide(description: "The matched availability ranges. Group days only when startMinute and endMinute are the same.")
-    var ranges: [GeneratedAvailabilityRange]
+    @Guide(description: "The minimum availability rules needed, in application order. Include broad rules before exclude exceptions.", .maximumCount(12))
+    var rules: [GeneratedAvailabilityRule]
 }
 
 @Generable
-private struct GeneratedAvailabilityRange {
-    @Guide(description: "Day codes from the prompt that match this range; use only listed codes.")
-    var dayCodes: [String]
+private struct GeneratedAvailabilityRule {
+    @Guide(description: "include marks available time; exclude removes exceptions from previously included time.")
+    var mode: GeneratedAvailabilityRuleMode
 
-    @Guide(description: "Start minute code from the times list. Use first only for all day/no start.", .range(0...1440))
-    var startMinute: Int
+    @Guide(description: "The date/day target for this rule.")
+    var target: GeneratedAvailabilityTarget
 
-    @Guide(description: "End minute code from the times list, exclusive. Use last only for all day/no end.", .range(0...1440))
-    var endMinute: Int
+    @Guide(description: "Required only when target is specificDate. Leave nil otherwise.")
+    var specificDate: GeneratedSpecificDate?
+
+    @Guide(description: "Start local clock time. Use 00:00 when no start time is stated.")
+    var startTime: GeneratedAvailabilityTime
+
+    @Guide(description: "End local clock time, exclusive. Use 24:00 when no end time is stated.")
+    var endTime: GeneratedAvailabilityTime
+}
+
+@Generable
+private enum GeneratedAvailabilityRuleMode {
+    case include
+    case exclude
+}
+
+@Generable
+private enum GeneratedAvailabilityTarget {
+    case everyday
+    case weekday
+    case weekend
+    case sunday
+    case monday
+    case tuesday
+    case wednesday
+    case thursday
+    case friday
+    case saturday
+    case specificDate
+}
+
+@Generable
+private struct GeneratedSpecificDate {
+    @Guide(description: "Four digit year in the prompt timezone.", .range(1...9999))
+    var year: Int
+
+    @Guide(description: "Month number in the prompt timezone.", .range(1...12))
+    var month: Int
+
+    @Guide(description: "Day of month in the prompt timezone.", .range(1...31))
+    var day: Int
+}
+
+@Generable
+private struct GeneratedAvailabilityTime {
+    @Guide(description: "24-hour clock hour. Use 24 only for end-of-day 24:00.", .range(0...24))
+    var hour: Int
+
+    @Guide(description: "Minute of the hour.", .range(0...59))
+    var minute: Int
+
+    var minuteAfterMidnight: Int? {
+        guard (0...24).contains(hour), (0..<60).contains(minute) else { return nil }
+
+        if hour == 24 {
+            return minute == 0 ? 1_440 : nil
+        }
+
+        return hour * 60 + minute
+    }
 }
