@@ -16,7 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "000000000000000100000000"
-               BuildableName = "crabfitapple.app"
+               BuildableName = "Crab Fit.app"
+               BlueprintName = "Crab Fit"
                ReferencedContainer = "container:crabfitapple.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -45,7 +46,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000100000000"
-            BuildableName = "crabfitapple.app"
+            BuildableName = "Crab Fit.app"
+            BlueprintName = "Crab Fit"
             ReferencedContainer = "container:crabfitapple.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -61,7 +63,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "000000000000000100000000"
-            BuildableName = "crabfitapple.app"
+            BuildableName = "Crab Fit.app"
+            BlueprintName = "Crab Fit"
             ReferencedContainer = "container:crabfitapple.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

@@ -7,16 +7,16 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		000000000000000000000120 /* crabfitapple.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = crabfitapple.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000120 /* Crab Fit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Crab Fit.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		99CFBE562FFF7A90000AC4E6 /* Exceptions for "crabfitapple" folder in "crabfitapple" target */ = {
+		99CFBE562FFF7A90000AC4E6 /* Exceptions for "crabfitapple" folder in "Crab Fit" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Support/Info.plist,
 			);
-			target = 000000000000000100000000 /* crabfitapple */;
+			target = 000000000000000100000000 /* Crab Fit */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -24,7 +24,7 @@
 		000000000000000000000010 /* crabfitapple */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				99CFBE562FFF7A90000AC4E6 /* Exceptions for "crabfitapple" folder in "crabfitapple" target */,
+				99CFBE562FFF7A90000AC4E6 /* Exceptions for "crabfitapple" folder in "Crab Fit" target */,
 			);
 			path = crabfitapple;
 			sourceTree = "<group>";
@@ -51,7 +51,7 @@
 		000000000000000000000020 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000120 /* crabfitapple.app */,
+				000000000000000000000120 /* Crab Fit.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -59,9 +59,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		000000000000000100000000 /* crabfitapple */ = {
+		000000000000000100000000 /* Crab Fit */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 000000000000000110000000 /* Build configuration list for PBXNativeTarget "crabfitapple" */;
+			buildConfigurationList = 000000000000000110000000 /* Build configuration list for PBXNativeTarget "Crab Fit" */;
 			buildPhases = (
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
@@ -72,9 +72,9 @@
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* crabfitapple */,
 			);
-			name = crabfitapple;
+			name = "Crab Fit";
 			productName = MyApp;
-			productReference = 000000000000000000000120 /* crabfitapple.app */;
+			productReference = 000000000000000000000120 /* Crab Fit.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -106,7 +106,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				000000000000000100000000 /* crabfitapple */,
+				000000000000000100000000 /* Crab Fit */,
 			);
 		};
 /* End PBXProject section */
@@ -260,7 +260,7 @@
 			};
 			name = Release;
 		};
-		000000000000000111000000 /* Debug configuration for PBXNativeTarget "crabfitapple" */ = {
+		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Crab Fit" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -310,7 +310,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -321,7 +321,7 @@
 			};
 			name = Debug;
 		};
-		000000000000000112000000 /* Release configuration for PBXNativeTarget "crabfitapple" */ = {
+		000000000000000112000000 /* Release configuration for PBXNativeTarget "Crab Fit" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -371,7 +371,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -393,11 +393,11 @@
 			);
 			defaultConfigurationName = Release;
 		};
-		000000000000000110000000 /* Build configuration list for PBXNativeTarget "crabfitapple" */ = {
+		000000000000000110000000 /* Build configuration list for PBXNativeTarget "Crab Fit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000111000000 /* Debug configuration for PBXNativeTarget "crabfitapple" */,
-				000000000000000112000000 /* Release configuration for PBXNativeTarget "crabfitapple" */,
+				000000000000000111000000 /* Debug configuration for PBXNativeTarget "Crab Fit" */,
+				000000000000000112000000 /* Release configuration for PBXNativeTarget "Crab Fit" */,
 			);
 			defaultConfigurationName = Release;
 		};
