@@ -303,7 +303,7 @@ struct EditAvailabilitySheet: View {
             }
             .animation(Self.selectionStyleAnimation, value: selectionStyle)
             .scrollDismissesKeyboard(.interactively)
-            .availabilityPromptBar {
+            .safeAreaBar(edge: .bottom) {
                 if isReady {
                     AvailabilityPromptBarView(
                         isInputDisabled: isAvailabilityPromptInputDisabled,
@@ -772,13 +772,5 @@ struct AvailabilityEditorContext: Equatable, Sendable {
         }
 
         return lowerIndex
-    }
-}
-
-private extension View {
-    func availabilityPromptBar<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        safeAreaBar(edge: .bottom, spacing: 0, content: content)
     }
 }

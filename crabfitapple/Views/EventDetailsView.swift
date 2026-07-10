@@ -457,15 +457,46 @@ struct EventDetailsView: View {
     }
 
     private func sortedPeople(_ people: [CrabFitPerson]) -> [CrabFitPerson] {
-        people.sorted { firstPerson, secondPerson in
-            firstPerson.name.localizedCaseInsensitiveCompare(secondPerson.name) == .orderedAscending
+        uniquePeople(from: people).sorted { firstPerson, secondPerson in
+            let nameComparison = firstPerson.name.localizedCaseInsensitiveCompare(secondPerson.name)
+            if nameComparison != .orderedSame {
+                return nameComparison == .orderedAscending
+            }
+
+            if firstPerson.createdAt != secondPerson.createdAt {
+                return firstPerson.createdAt < secondPerson.createdAt
+            }
+
+            return firstPerson.id < secondPerson.id
         }
     }
 
+    private func uniquePeople(from people: [CrabFitPerson]) -> [CrabFitPerson] {
+        var personByID: [String: CrabFitPerson] = [:]
+
+        for person in people {
+            guard let existingPerson = personByID[person.id] else {
+                personByID[person.id] = person
+                continue
+            }
+
+            if person.createdAt >= existingPerson.createdAt {
+                personByID[person.id] = person
+            }
+        }
+
+        return Array(personByID.values)
+    }
+
     private func availabilityByPerson(for people: [CrabFitPerson]) -> [String: Set<String>] {
-        Dictionary(uniqueKeysWithValues: people.map { person in
-            (person.id, Set(person.availability))
-        })
+        Dictionary(
+            people.map { person in
+                (person.id, Set(person.availability))
+            },
+            uniquingKeysWith: { firstAvailability, secondAvailability in
+                firstAvailability.union(secondAvailability)
+            }
+        )
     }
 
     private func availabilityCountByRawValue(for people: [CrabFitPerson]) -> [String: Int] {

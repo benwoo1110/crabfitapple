@@ -34,7 +34,7 @@ struct AvailabilityPromptBarView: View {
                     .padding(.vertical, 10)
                     .frame(minHeight: 48)
                     .frame(maxWidth: .infinity)
-                    .glassEffect(.regular, in: .capsule)
+                    .glassEffect(.regular.interactive(), in: .capsule)
 
                 sendControl
             }
@@ -65,17 +65,18 @@ struct AvailabilityPromptBarView: View {
     private var sendControl: some View {
         if isGenerating {
             ProgressView()
-                .frame(width: 44, height: 44)
-                .background(.regularMaterial, in: Circle())
+                .frame(width: 48, height: 48)
+                .glassEffect(.regular)
                 .accessibilityLabel("Updating Availability")
         } else {
-            Button("Apply Availability", systemImage: "arrow.up", action: submitPrompt)
-                .labelStyle(.iconOnly)
-                .font(.headline.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .buttonStyle(.glassProminent)
-                .tint(canSubmit ? Color.accentColor : Color.secondary)
-                .disabled(!canSubmit)
+            Button(action: submitPrompt) {
+                Image(systemName: "arrow.up")
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 24, height: 34)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(canSubmit ? Color.accentColor : Color.secondary)
+            .disabled(!canSubmit)
         }
     }
 
