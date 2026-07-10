@@ -17,22 +17,15 @@ struct AvailabilityPromptBarView: View {
     }
 
     var body: some View {
-        Group {
-            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-                liquidGlassPromptBar
-            } else {
-                materialPromptBar
+        liquidGlassPromptBar
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .onChange(of: clearTrigger) {
+                prompt = ""
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .onChange(of: clearTrigger) {
-            prompt = ""
-        }
     }
 
-    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     private var liquidGlassPromptBar: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
@@ -45,23 +38,6 @@ struct AvailabilityPromptBarView: View {
 
                 sendControl
             }
-        }
-    }
-
-    private var materialPromptBar: some View {
-        HStack(spacing: 8) {
-            promptFieldContent
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .frame(minHeight: 48)
-                .frame(maxWidth: .infinity)
-                .background(.regularMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.quaternary, lineWidth: 1)
-                }
-
-            sendControl
         }
     }
 
@@ -92,22 +68,13 @@ struct AvailabilityPromptBarView: View {
                 .frame(width: 44, height: 44)
                 .background(.regularMaterial, in: Circle())
                 .accessibilityLabel("Updating Availability")
-        } else if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+        } else {
             Button("Apply Availability", systemImage: "arrow.up", action: submitPrompt)
                 .labelStyle(.iconOnly)
                 .font(.headline.weight(.semibold))
                 .frame(width: 44, height: 44)
                 .buttonStyle(.glassProminent)
                 .tint(canSubmit ? Color.accentColor : Color.secondary)
-                .disabled(!canSubmit)
-        } else {
-            Button("Apply Availability", systemImage: "arrow.up", action: submitPrompt)
-                .labelStyle(.iconOnly)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(canSubmit ? Color.white : Color.secondary)
-                .frame(width: 44, height: 44)
-                .background(canSubmit ? Color.accentColor : Color.secondary.opacity(0.14), in: Circle())
-                .contentShape(Circle())
                 .disabled(!canSubmit)
         }
     }

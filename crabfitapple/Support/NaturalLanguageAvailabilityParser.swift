@@ -1,15 +1,9 @@
 import Foundation
-
-#if canImport(FoundationModels)
 import FoundationModels
-#endif
 
 @MainActor
 final class NaturalLanguageAvailabilityParser {
-#if canImport(FoundationModels)
-    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     private lazy var foundationModelAvailabilityParser = FoundationModelAvailabilityParser()
-#endif
 
     func prewarm(
         boundaries: [AvailabilityRangeBoundary],
@@ -17,14 +11,10 @@ final class NaturalLanguageAvailabilityParser {
     ) {
         guard boundaries.count >= 2 else { return }
 
-#if canImport(FoundationModels)
-        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-            foundationModelAvailabilityParser.prewarm(
-                boundaries: boundaries,
-                timeZoneIdentifier: timeZoneIdentifier
-            )
-        }
-#endif
+        foundationModelAvailabilityParser.prewarm(
+            boundaries: boundaries,
+            timeZoneIdentifier: timeZoneIdentifier
+        )
     }
 
     func ranges(
@@ -41,18 +31,10 @@ final class NaturalLanguageAvailabilityParser {
             throw NaturalLanguageAvailabilityParserError.noAvailableBoundaries
         }
 
-#if canImport(FoundationModels)
-        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-            return try await foundationModelAvailabilityParser.ranges(
-                from: trimmedPrompt,
-                boundaries: boundaries,
-                timeZoneIdentifier: timeZoneIdentifier
-            )
-        }
-#endif
-
-        throw NaturalLanguageAvailabilityParserError.foundationModelsUnavailable(
-            "Natural language availability requires Apple Intelligence on iOS 26 or later."
+        return try await foundationModelAvailabilityParser.ranges(
+            from: trimmedPrompt,
+            boundaries: boundaries,
+            timeZoneIdentifier: timeZoneIdentifier
         )
     }
 }
@@ -83,8 +65,6 @@ enum NaturalLanguageAvailabilityParserError: LocalizedError {
     }
 }
 
-#if canImport(FoundationModels)
-@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 private final class FoundationModelAvailabilityParser {
     private var prewarmedSession: LanguageModelSession?
     private var prewarmedContext: AvailabilityPromptContext?
@@ -492,7 +472,6 @@ private final class FoundationModelAvailabilityParser {
     private static let minutesPerDay = 1_440
 }
 
-@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 private struct BoundaryPlacement {
     let index: Int
     let dayKey: String
@@ -540,14 +519,12 @@ private struct BoundaryPromptDaySummary {
     }
 }
 
-@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 @Generable
 private struct GeneratedAvailabilityResponse {
     @Guide(description: "The matched availability ranges. Group days only when startMinute and endMinute are the same.")
     var ranges: [GeneratedAvailabilityRange]
 }
 
-@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 @Generable
 private struct GeneratedAvailabilityRange {
     @Guide(description: "Day codes from the prompt that match this range; use only listed codes.")
@@ -559,4 +536,3 @@ private struct GeneratedAvailabilityRange {
     @Guide(description: "End minute code from the times list, exclusive. Use last only for all day/no end.", .range(0...1440))
     var endMinute: Int
 }
-#endif

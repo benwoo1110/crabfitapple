@@ -761,14 +761,9 @@ struct AvailabilityEditorContext: Equatable, Sendable {
 }
 
 private extension View {
-    @ViewBuilder
     func availabilityPromptBar<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-            safeAreaBar(edge: .bottom, spacing: 0, content: content)
-        } else {
-            safeAreaInset(edge: .bottom, spacing: 0, content: content)
-        }
+        safeAreaBar(edge: .bottom, spacing: 0, content: content)
     }
 }
