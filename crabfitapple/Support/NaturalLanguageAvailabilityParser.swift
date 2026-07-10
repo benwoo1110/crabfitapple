@@ -101,14 +101,15 @@ private final class FoundationModelAvailabilityParser {
         do {
             let response = try await session.respond(
                 to: Self.prompt(for: prompt, context: context),
-                generating: GeneratedAvailabilityResponse.self,
-                options: GenerationOptions(samplingMode: .random(top: 5, seed: 91827397), temperature: 0.5)
+                generating: GeneratedAvailabilityResponse.self
             )
-
-            print(response.content.rules)
+            
+            print(prompt)
+            print(response.content.recurringRules)
+            print(response.content.specificDateRules)
 
             return try editRanges(
-                from: response.content.rules,
+                from: response.content,
                 rangeSlots: rangeSlots,
                 timeZoneIdentifier: timeZoneIdentifier
             )
@@ -135,19 +136,30 @@ private final class FoundationModelAvailabilityParser {
 
     private static var instructions: String {
         """
-        Extract the user's intended availability rules as local date and time data only.
-        Do not use or infer any event details. Do not decide whether a date or time is valid for an event.
-        Use include for available time and exclude for exception phrases such as except, excluding, but not, unavailable, or not.
-        For "every day except Friday 1pm-3pm", return an include everyday rule and then an exclude Friday rule.
-        Targets are everyday, weekday, weekend, a named weekday target, or specificDate.
-        Return the minimum number of rules needed. Do not expand everyday into weekday, weekend, named weekdays, or specificDate rules.
-        Use named weekday targets only for named weekdays. Use specificDate only for explicit or relative calendar dates.
-        Resolve relative dates with the provided today value and timezone.
-        Times are local 24-hour clock times with hour and minute fields. 3pm is hour 15 minute 0.
-        Use 00:00 for start of day and 24:00 for end of day.
-        If no time is stated, use 00:00 to 24:00. "After 2pm" means 14:00 to 24:00. "Any day after 3pm" means one everyday rule from 15:00 to 24:00. "Before noon" means 00:00 to 12:00.
-        Split overnight ranges into two same-day rules, such as Monday 22:00-24:00 and Tuesday 00:00-02:00.
-        Preserve the rule order needed to apply includes and excludes correctly.
+        Extract only the user's stated date/day/time availability. Do not use event details or validate against an event.
+        Process each top-level clause separately; clauses may be separated by commas, semicolons, "and", or "also".
+        Each rule must come from one clause. A time phrase alone never creates a broad recurring rule.
+
+        Put calendar-date clauses in specificDateRules. Dates include "18 July", "July 18", "tomorrow", "this Friday", and "next Friday"; resolve omitted years to the next occurrence on or after today in the prompt timezone.
+        Put repeated-day clauses in recurringRules only when the clause says a recurrence:
+        allSevenDays = every day, everyday, any day, all days, daily.
+        mondayToFriday = weekdays, workdays, business days, Monday-Friday. Never includes Saturday or Sunday.
+        saturdayAndSunday = weekend or weekends.
+        Named weekdays = bare weekday names or abbreviations: mon, tue, wed, thu, fri, sat, sun, monday, tuesday, wednesday, thursday, friday, saturday, sunday.
+        Bare weekday names and abbreviations are recurringRules, not specificDateRules. Use specificDateRules for weekdays only when the same clause says this/next plus a weekday.
+
+        Use include for available time. Use exclude for exceptions such as except, excluding, but not, unavailable, or not.
+        Return the minimum rules needed; do not expand broad targets into narrower targets.
+
+        Times are local 24-hour clock times. Use 00:00 for start of day and 24:00 for end of day.
+        No time means 00:00-24:00. After/from/onwards means start-24:00. Before/until means 00:00-end.
+        Morning = 00:00-12:00. Afternoon = 12:00-17:00. Evening = 17:00-24:00.
+        Split overnight ranges into two same-day rules.
+
+        Example: "18 July 3pm onwards, 19 July only morning, weekdays 1pm onwards"
+        => specificDateRules: 18 July 15:00-24:00, 19 July 00:00-12:00; recurringRules: mondayToFriday 13:00-24:00.
+        Example: "Weekdays 1pm onwards, sat 2-4pm, sun 1-3pm"
+        => recurringRules: mondayToFriday 13:00-24:00, saturday 14:00-16:00, sunday 13:00-15:00; specificDateRules: empty.
         """
     }
 
@@ -176,11 +188,11 @@ private final class FoundationModelAvailabilityParser {
     }
 
     private func editRanges(
-        from generatedRules: [GeneratedAvailabilityRule],
+        from response: GeneratedAvailabilityResponse,
         rangeSlots: [AvailabilityRangeSlot],
         timeZoneIdentifier: String
     ) throws -> [AvailabilityEditRange] {
-        let rules = Self.normalizedRules(from: generatedRules.compactMap(AvailabilityRule.init(generatedRule:)))
+        let rules = Self.normalizedRules(from: AvailabilityRule.rules(from: response))
         guard !rules.isEmpty else {
             throw NaturalLanguageAvailabilityParserError.invalidGeneratedRanges
         }
@@ -420,13 +432,14 @@ private struct LocalAvailabilitySlot {
     private static let minutesPerDay = 1_440
 }
 
+@MainActor
 private struct AvailabilityRule: Equatable {
     let mode: AvailabilityRuleMode
     let target: AvailabilityRuleTarget
     let startMinute: Int
     let endMinute: Int
 
-    init?(generatedRule: GeneratedAvailabilityRule) {
+    init?(generatedRule: GeneratedRecurringAvailabilityRule) {
         guard let startMinute = generatedRule.startTime.minuteAfterMidnight,
               let endMinute = generatedRule.endTime.minuteAfterMidnight else {
             return nil
@@ -442,6 +455,26 @@ private struct AvailabilityRule: Equatable {
         self.target = target
         self.startMinute = startMinute
         self.endMinute = endMinute
+    }
+
+    init?(generatedRule: GeneratedSpecificDateAvailabilityRule) {
+        guard let startMinute = generatedRule.startTime.minuteAfterMidnight,
+              let endMinute = generatedRule.endTime.minuteAfterMidnight,
+              let mode = AvailabilityRuleMode(generatedMode: generatedRule.mode),
+              let target = AvailabilityRuleTarget(generatedDate: generatedRule.specificDate),
+              startMinute < endMinute else {
+            return nil
+        }
+
+        self.mode = mode
+        self.target = target
+        self.startMinute = startMinute
+        self.endMinute = endMinute
+    }
+
+    static func rules(from response: GeneratedAvailabilityResponse) -> [AvailabilityRule] {
+        response.recurringRules.compactMap(AvailabilityRule.init(generatedRule:))
+            + response.specificDateRules.compactMap(AvailabilityRule.init(generatedRule:))
     }
 
     var isInclude: Bool {
@@ -476,13 +509,13 @@ private enum AvailabilityRuleTarget: Equatable {
     case dayOfWeek(Int)
     case specificDate(year: Int, month: Int, day: Int)
 
-    init?(generatedRule: GeneratedAvailabilityRule) {
+    init?(generatedRule: GeneratedRecurringAvailabilityRule) {
         switch generatedRule.target {
-        case .everyday:
+        case .allSevenDays:
             self = .everyday
-        case .weekday:
+        case .mondayToFriday:
             self = .weekdays
-        case .weekend:
+        case .saturdayAndSunday:
             self = .weekend
         case .sunday:
             self = .dayOfWeek(0)
@@ -498,12 +531,25 @@ private enum AvailabilityRuleTarget: Equatable {
             self = .dayOfWeek(5)
         case .saturday:
             self = .dayOfWeek(6)
-        case .specificDate:
-            guard let date = Self.specificDate(from: generatedRule.specificDate) else { return nil }
-            self = .specificDate(year: date.year, month: date.month, day: date.day)
         @unknown default:
             return nil
         }
+    }
+
+    init?(generatedDate: GeneratedSpecificDate) {
+        guard Self.isValidDate(
+            year: generatedDate.year,
+            month: generatedDate.month,
+            day: generatedDate.day
+        ) else {
+            return nil
+        }
+
+        self = .specificDate(
+            year: generatedDate.year,
+            month: generatedDate.month,
+            day: generatedDate.day
+        )
     }
 
     func matches(_ slot: LocalAvailabilitySlot) -> Bool {
@@ -519,19 +565,6 @@ private enum AvailabilityRuleTarget: Equatable {
         case .specificDate(let year, let month, let day):
             !slot.usesWeekdayLabel && slot.year == year && slot.month == month && slot.day == day
         }
-    }
-
-    private static func specificDate(from generatedDate: GeneratedSpecificDate?) -> (year: Int, month: Int, day: Int)? {
-        guard let generatedDate,
-              Self.isValidDate(
-                  year: generatedDate.year,
-                  month: generatedDate.month,
-                  day: generatedDate.day
-              ) else {
-            return nil
-        }
-
-        return (generatedDate.year, generatedDate.month, generatedDate.day)
     }
 
     private static func isValidDate(year: Int, month: Int, day: Int) -> Bool {
@@ -564,20 +597,20 @@ private enum AvailabilityRuleTarget: Equatable {
 
 @Generable
 private struct GeneratedAvailabilityResponse {
-    @Guide(description: "The minimum availability rules needed, in application order. Include broad rules before exclude exceptions.", .maximumCount(12))
-    var rules: [GeneratedAvailabilityRule]
+    @Guide(description: "Repeated-day rules only. Use for weekdays, weekends, and bare weekday names/abbreviations like sat or sun. Never use for date clauses like 18 July, tomorrow, this Friday, or next Friday.", .maximumCount(8))
+    var recurringRules: [GeneratedRecurringAvailabilityRule]
+
+    @Guide(description: "Calendar-date rules only, such as 18 July, July 19, tomorrow, this Friday, or next Friday. Return an empty array when there are no date clauses.", .maximumCount(8))
+    var specificDateRules: [GeneratedSpecificDateAvailabilityRule]
 }
 
 @Generable
-private struct GeneratedAvailabilityRule {
+private struct GeneratedRecurringAvailabilityRule {
     @Guide(description: "include marks available time; exclude removes exceptions from previously included time.")
     var mode: GeneratedAvailabilityRuleMode
 
-    @Guide(description: "The date/day target for this rule.")
-    var target: GeneratedAvailabilityTarget
-
-    @Guide(description: "Required only when target is specificDate. Leave nil otherwise.")
-    var specificDate: GeneratedSpecificDate?
+    @Guide(description: "One recurring target. allSevenDays for every/any/all days/daily; mondayToFriday for weekdays/workdays/business days/Mon-Fri; saturdayAndSunday for weekends; saturday for sat; sunday for sun; other named weekday only when named.")
+    var target: GeneratedRecurringAvailabilityTarget
 
     @Guide(description: "Start local clock time. Use 00:00 when no start time is stated.")
     var startTime: GeneratedAvailabilityTime
@@ -587,16 +620,31 @@ private struct GeneratedAvailabilityRule {
 }
 
 @Generable
+private struct GeneratedSpecificDateAvailabilityRule {
+    @Guide(description: "include marks available time; exclude removes exceptions from previously included time.")
+    var mode: GeneratedAvailabilityRuleMode
+
+    @Guide(description: "The resolved calendar date in the prompt timezone. Required for every specificDateRule.")
+    var specificDate: GeneratedSpecificDate
+
+    @Guide(description: "Start local clock time on this date. Use 00:00 when no start time is stated.")
+    var startTime: GeneratedAvailabilityTime
+
+    @Guide(description: "End local clock time on this date, exclusive. Use 24:00 when no end time is stated.")
+    var endTime: GeneratedAvailabilityTime
+}
+
+@Generable
 private enum GeneratedAvailabilityRuleMode {
     case include
     case exclude
 }
 
-@Generable
-private enum GeneratedAvailabilityTarget {
-    case everyday
-    case weekday
-    case weekend
+@Generable(description: "The repeated day set targeted by one recurring availability rule.")
+private enum GeneratedRecurringAvailabilityTarget {
+    case allSevenDays
+    case mondayToFriday
+    case saturdayAndSunday
     case sunday
     case monday
     case tuesday
@@ -604,7 +652,6 @@ private enum GeneratedAvailabilityTarget {
     case thursday
     case friday
     case saturday
-    case specificDate
 }
 
 @Generable

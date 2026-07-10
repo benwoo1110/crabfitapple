@@ -302,7 +302,7 @@ struct EditAvailabilitySheet: View {
                 }
             }
             .animation(Self.selectionStyleAnimation, value: selectionStyle)
-            .scrollDismissesKeyboard(.interactively)
+            .scrollDismissesKeyboard(.immediately)
             .safeAreaBar(edge: .bottom) {
                 if isReady {
                     AvailabilityPromptBarView(

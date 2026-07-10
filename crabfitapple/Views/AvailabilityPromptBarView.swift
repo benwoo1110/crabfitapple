@@ -17,16 +17,6 @@ struct AvailabilityPromptBarView: View {
     }
 
     var body: some View {
-        liquidGlassPromptBar
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .onChange(of: clearTrigger) {
-                prompt = ""
-            }
-    }
-
-    private var liquidGlassPromptBar: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
                 promptFieldContent
@@ -48,13 +38,12 @@ struct AvailabilityPromptBarView: View {
                 .accessibilityHidden(true)
 
             TextField(
-                "10 to 12 noon on weekdays except Friday",
+                "1-3pm on weekdays except Friday",
                 text: $prompt,
                 axis: .vertical
             )
             .textFieldStyle(.plain)
             .lineLimit(1...3)
-            .submitLabel(.done)
             .textInputAutocapitalization(.sentences)
             .disabled(isInputDisabled)
             .onSubmit(submitPrompt)
