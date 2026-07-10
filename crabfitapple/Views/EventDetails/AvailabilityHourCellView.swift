@@ -8,10 +8,16 @@ struct AvailabilityHourCellView: View {
     let highlightedSlotRawValues: Set<String>
     @Binding var selectedSlot: AvailabilityGridSlot?
 
+    private var segments: [AvailabilityHourSegment] {
+        slots.enumerated().map { index, slot in
+            AvailabilityHourSegment(id: index, slot: slot)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(slots.indices, id: \.self) { index in
-                if let slot = slots[index] {
+            ForEach(segments) { segment in
+                if let slot = segment.slot {
                     let availableCount = availabilityCountByRawValue[slot.rawValue, default: 0]
 
                     Button {
@@ -85,4 +91,9 @@ struct AvailabilityHourCellView: View {
 
         return "\(availableCount) people available"
     }
+}
+
+private struct AvailabilityHourSegment: Identifiable {
+    let id: Int
+    let slot: AvailabilityGridSlot?
 }

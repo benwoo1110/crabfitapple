@@ -6,7 +6,9 @@ struct AvailabilityPromptBarView: View {
     let clearTrigger: Int
     let submitAction: (String) -> Void
 
+    
     @State private var prompt = ""
+    @FocusState private var isInputFocused: Bool
 
     private var trimmedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,7 +30,9 @@ struct AvailabilityPromptBarView: View {
 
                 sendControl
             }
+            .padding()
         }
+        .animation(.default, value: canSubmit)
     }
 
     private var promptFieldContent: some View {
@@ -42,6 +46,7 @@ struct AvailabilityPromptBarView: View {
                 text: $prompt,
                 axis: .vertical
             )
+            .focused($isInputFocused)
             .textFieldStyle(.plain)
             .lineLimit(1...3)
             .textInputAutocapitalization(.sentences)
@@ -71,6 +76,7 @@ struct AvailabilityPromptBarView: View {
 
     private func submitPrompt() {
         guard canSubmit else { return }
+        isInputFocused = false
         submitAction(trimmedPrompt)
     }
 }

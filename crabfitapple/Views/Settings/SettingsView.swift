@@ -2,10 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var password = ""
-    @State private var isShowingError = false
-    @State private var errorMessage = ""
+    @State private var viewModel = SettingsViewModel()
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -13,20 +10,12 @@ struct SettingsView: View {
         case password
     }
 
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var canSave: Bool {
-        !trimmedName.isEmpty
-    }
-
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     LabeledContent("Name") {
-                        TextField("Required", text: $name)
+                        TextField("Required", text: $viewModel.name)
                             .textContentType(.name)
                             .multilineTextAlignment(.trailing)
                             .submitLabel(.next)
@@ -35,7 +24,7 @@ struct SettingsView: View {
                     }
 
                     LabeledContent("Password") {
-                        SecureField("Optional", text: $password)
+                        SecureField("Optional", text: $viewModel.password)
                             .textContentType(.password)
                             .multilineTextAlignment(.trailing)
                             .submitLabel(.done)
@@ -54,12 +43,12 @@ struct SettingsView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: saveButtonTapped)
-                        .disabled(!canSave)
+                        .disabled(!viewModel.canSave)
                 }
             }
-            .alert("Could Not Save Settings", isPresented: $isShowingError) {
+            .alert("Could Not Save Settings", isPresented: $viewModel.isShowingError) {
             } message: {
-                Text(errorMessage)
+                Text(viewModel.errorMessage)
             }
             .task(loadSettings)
         }
@@ -74,34 +63,18 @@ struct SettingsView: View {
     }
 
     private func loadSettings() async {
-        do {
-            let credentials = try AvailabilityCredentialsStore.load()
-            name = credentials.name
-            password = credentials.password
-        } catch {
-            show(error)
-        }
-
+        await viewModel.loadSettings()
         await Task.yield()
-        if name.isEmpty {
+
+        if viewModel.name.isEmpty {
             focusedField = .name
         }
     }
 
     private func saveButtonTapped() {
-        guard canSave else { return }
-
-        do {
-            try AvailabilityCredentialsStore.save(name: trimmedName, password: password)
+        if viewModel.saveSettings() {
             dismiss()
-        } catch {
-            show(error)
         }
-    }
-
-    private func show(_ error: Error) {
-        errorMessage = error.localizedDescription
-        isShowingError = true
     }
 }
 

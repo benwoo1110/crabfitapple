@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftData
 import SwiftUI
 #if canImport(UIKit)
@@ -7,42 +8,40 @@ import UIKit
 import AppKit
 #endif
 
-struct AddEventSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @State private var eventEntryMode = EventEntryMode.existing
-    @State private var eventID = ""
-    @State private var newEventName = ""
-    @State private var newEventDateMode = NewEventDateMode.specificDates
-    @State private var selectedSpecificDateComponents: Set<DateComponents> = []
-    @State private var selectedWeekdays: Set<EventWeekday> = []
-    @State private var newEventStartHour = 9
-    @State private var newEventEndHour = 17
-    @State private var newEventTimeZoneID = Self.defaultTimeZoneIdentifier
-    @State private var isSaving = false
-    @State private var isShowingError = false
-    @State private var errorMessage = ""
-    @FocusState private var isEventIDFieldFocused: Bool
+@Observable
+final class AddEventSheetViewModel {
+    var eventEntryMode = EventEntryMode.existing
+    var eventID = ""
+    var newEventName = ""
+    var newEventDateMode = NewEventDateMode.specificDates
+    var selectedSpecificDateComponents: Set<DateComponents> = []
+    var selectedWeekdays: Set<EventWeekday> = []
+    var newEventStartHour = 9
+    var newEventEndHour = 17
+    var newEventTimeZoneID = AddEventSheetViewModel.defaultTimeZoneIdentifier
+    var isSaving = false
+    var isShowingError = false
+    var errorMessage = ""
 
-    private let api = CrabFitApi()
+    private let api: CrabFitApi
 
-    private static let timeZoneIdentifiers = TimeZone.knownTimeZoneIdentifiers.sorted()
+    static let timeZoneIdentifiers = TimeZone.knownTimeZoneIdentifiers.sorted()
     private static let utcTimeZone = TimeZone(identifier: "UTC") ?? .current
 
-    private static var eventEntryModeAnimation: Animation {
-        .easeInOut(duration: 0.2)
+    init(api: CrabFitApi = CrabFitApi()) {
+        self.api = api
     }
 
-    private static var defaultTimeZoneIdentifier: String {
+    static var defaultTimeZoneIdentifier: String {
         let identifier = TimeZone.current.identifier
         return timeZoneIdentifiers.contains(identifier) ? identifier : "UTC"
     }
 
-    private var submittedEventID: String? {
+    var submittedEventID: String? {
         Self.eventID(from: eventID)
     }
 
-    private var hasSelectedCreateDates: Bool {
+    var hasSelectedCreateDates: Bool {
         switch newEventDateMode {
         case .specificDates:
             !selectedSpecificDateComponents.isEmpty
@@ -51,7 +50,7 @@ struct AddEventSheet: View {
         }
     }
 
-    private var newEventInput: CrabFitEventInput? {
+    var newEventInput: CrabFitEventInput? {
         let times = newEventTimes
         guard !times.isEmpty else { return nil }
 
@@ -59,7 +58,7 @@ struct AddEventSheet: View {
         return CrabFitEventInput(name: trimmedName, times: times, timezone: newEventTimeZoneID)
     }
 
-    private var newEventTimes: [String] {
+    var newEventTimes: [String] {
         guard hasSelectedCreateDates,
               newEventStartHour != newEventEndHour,
               let timeZone = TimeZone(identifier: newEventTimeZoneID) else {
@@ -85,33 +84,23 @@ struct AddEventSheet: View {
         return CrabFitTimeSlot.sortedRawValues(rawValues)
     }
 
-    private var sortedSpecificDateComponents: [DateComponents] {
+    var sortedSpecificDateComponents: [DateComponents] {
         selectedSpecificDateComponents.sorted { firstComponents, secondComponents in
             Self.dateSortValue(firstComponents) < Self.dateSortValue(secondComponents)
         }
     }
 
-    private var sortedSelectedWeekdays: [EventWeekday] {
+    var sortedSelectedWeekdays: [EventWeekday] {
         selectedWeekdays.sorted { firstWeekday, secondWeekday in
             firstWeekday.sortOrder < secondWeekday.sortOrder
         }
     }
 
-    private var selectedEventHours: [Int] {
+    var selectedEventHours: [Int] {
         Self.eventHours(startHour: newEventStartHour, endHour: newEventEndHour)
     }
 
-    private var eventEntryModeBinding: Binding<EventEntryMode> {
-        Binding {
-            eventEntryMode
-        } set: { newMode in
-            withAnimation(Self.eventEntryModeAnimation) {
-                eventEntryMode = newMode
-            }
-        }
-    }
-
-    private var canSubmit: Bool {
+    var canSubmit: Bool {
         guard !isSaving else { return false }
 
         switch eventEntryMode {
@@ -122,7 +111,7 @@ struct AddEventSheet: View {
         }
     }
 
-    private var primaryButtonTitle: String {
+    var primaryButtonTitle: String {
         switch eventEntryMode {
         case .existing:
             "Add"
@@ -131,7 +120,7 @@ struct AddEventSheet: View {
         }
     }
 
-    private var progressAccessibilityLabel: String {
+    var progressAccessibilityLabel: String {
         switch eventEntryMode {
         case .existing:
             "Adding Event"
@@ -140,7 +129,7 @@ struct AddEventSheet: View {
         }
     }
 
-    private var dateFooterText: String {
+    var dateFooterText: String {
         switch newEventDateMode {
         case .specificDates:
             if selectedSpecificDateComponents.isEmpty {
@@ -159,7 +148,7 @@ struct AddEventSheet: View {
         }
     }
 
-    private var timeFooterText: String {
+    var timeFooterText: String {
         if newEventStartHour == newEventEndHour {
             return "Choose different start and end times."
         }
@@ -167,204 +156,64 @@ struct AddEventSheet: View {
         return "Creates one-hour event options across this time range."
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                switch eventEntryMode {
-                case .existing:
-                    existingEventSection
-                case .create:
-                    createEventSections
-                }
-            }
-            .animation(Self.eventEntryModeAnimation, value: eventEntryMode)
-            .navigationTitle(eventEntryMode.navigationTitle)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: cancel)
-                        .disabled(isSaving)
-                }
-
-                ToolbarItem(placement: .principal) {
-                    Picker("Event Action", selection: eventEntryModeBinding) {
-                        ForEach(EventEntryMode.allCases) { mode in
-                            Text(mode.title)
-                                .tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isSaving)
-                    .frame(maxWidth: 220)
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSaving {
-                        ProgressView()
-                            .accessibilityLabel(progressAccessibilityLabel)
-                    } else {
-                        Button(primaryButtonTitle, action: primaryButtonTapped)
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!canSubmit)
-                    }
-                }
-            }
-            .alert("Could Not Save Event", isPresented: $isShowingError) {
-            } message: {
-                Text(errorMessage)
-            }
-            .task(prepareTextInput)
-            .onChange(of: eventEntryMode) { _, newMode in
-                isEventIDFieldFocused = newMode == .existing
-            }
-        }
-    }
-
-    private var existingEventSection: some View {
-        Section {
-            TextField("Event ID or URL", text: $eventID)
-#if os(iOS) || os(visionOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-#endif
-                .autocorrectionDisabled()
-                .submitLabel(.done)
-                .focused($isEventIDFieldFocused)
-                .disabled(isSaving)
-                .onSubmit(primaryButtonTapped)
-        } header: {
-            Text("Event")
-        } footer: {
-            Text("Use a Crab Fit event URL or event ID.")
-        }
-    }
-
-    @ViewBuilder
-    private var createEventSections: some View {
-        Section {
-            TextField("Name", text: $newEventName)
-#if os(iOS) || os(visionOS)
-                .textInputAutocapitalization(.sentences)
-#endif
-                .disabled(isSaving)
-        } header: {
-            Text("Event Name")
-        } footer: {
-            Text("Leave blank to generate one.")
-        }
-
-        Section {
-            Picker("Date Type", selection: $newEventDateMode) {
-                ForEach(NewEventDateMode.allCases) { mode in
-                    Text(mode.title)
-                        .tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(isSaving)
-
-            switch newEventDateMode {
-            case .specificDates:
-                MultiDatePicker("Specific Dates", selection: $selectedSpecificDateComponents)
-                    .disabled(isSaving)
-            case .weekdays:
-                ForEach(EventWeekday.allCases) { weekday in
-                    Toggle(weekday.title, isOn: weekdaySelectionBinding(for: weekday))
-                        .disabled(isSaving)
-                }
-            }
-        } header: {
-            Text("Dates")
-        } footer: {
-            Text(dateFooterText)
-        }
-
-        Section {
-            Picker("Start", selection: $newEventStartHour) {
-                ForEach(0..<24, id: \.self) { hour in
-                    Text(Self.formattedHour(hour))
-                        .tag(hour)
-                }
-            }
-            .disabled(isSaving)
-
-            Picker("End", selection: $newEventEndHour) {
-                ForEach(0..<24, id: \.self) { hour in
-                    Text(Self.formattedHour(hour))
-                        .tag(hour)
-                }
-            }
-            .disabled(isSaving)
-        } header: {
-            Text("Times")
-        } footer: {
-            Text(timeFooterText)
-        }
-
-        Section {
-            Picker("Timezone", selection: $newEventTimeZoneID) {
-                ForEach(Self.timeZoneIdentifiers, id: \.self) { identifier in
-                    Text(identifier)
-                        .tag(identifier)
-                }
-            }
-            .disabled(isSaving)
-        }
-    }
-
-    private func cancel() {
-        dismiss()
-    }
-
-    private func prepareTextInput() async {
+    func prepareTextInput() async {
         if eventID.isEmpty, let clipboardText = Self.prefillText(from: Self.clipboardString) {
             eventID = clipboardText
         }
-
-        await Task.yield()
-        isEventIDFieldFocused = eventEntryMode == .existing
     }
 
-    private func primaryButtonTapped() {
-        Task {
-            switch eventEntryMode {
-            case .existing:
-                await addExistingEvent()
-            case .create:
-                await createEvent()
-            }
+    func primaryButtonTapped(modelContext: ModelContext) async -> Bool {
+        switch eventEntryMode {
+        case .existing:
+            return await addExistingEvent(modelContext: modelContext)
+        case .create:
+            return await createEvent(modelContext: modelContext)
         }
     }
 
-    private func addExistingEvent() async {
-        guard let requestedEventID = submittedEventID, !isSaving else { return }
+    func isWeekdaySelected(_ weekday: EventWeekday) -> Bool {
+        selectedWeekdays.contains(weekday)
+    }
+
+    func setWeekday(_ weekday: EventWeekday, isSelected: Bool) {
+        if isSelected {
+            selectedWeekdays.insert(weekday)
+        } else {
+            selectedWeekdays.remove(weekday)
+        }
+    }
+
+    private func addExistingEvent(modelContext: ModelContext) async -> Bool {
+        guard let requestedEventID = submittedEventID, !isSaving else { return false }
 
         isSaving = true
         defer { isSaving = false }
 
         do {
-            guard try !savedEventExists(eventID: requestedEventID) else {
+            guard try !savedEventExists(eventID: requestedEventID, modelContext: modelContext) else {
                 showDuplicateEventError()
-                return
+                return false
             }
 
             let event = try await api.event(id: requestedEventID)
 
-            guard try !savedEventExists(eventID: event.id) else {
+            guard try !savedEventExists(eventID: event.id, modelContext: modelContext) else {
                 showDuplicateEventError()
-                return
+                return false
             }
 
-            try insertSavedEvent(event)
-            dismiss()
+            try insertSavedEvent(event, modelContext: modelContext)
+            return true
         } catch {
             showError(error.localizedDescription)
+            return false
         }
     }
 
-    private func createEvent() async {
+    private func createEvent(modelContext: ModelContext) async -> Bool {
         guard let input = newEventInput, !isSaving else {
             showCreateEventValidationError()
-            return
+            return false
         }
 
         isSaving = true
@@ -373,24 +222,25 @@ struct AddEventSheet: View {
         do {
             let event = try await api.createEvent(input)
 
-            guard try !savedEventExists(eventID: event.id) else {
+            guard try !savedEventExists(eventID: event.id, modelContext: modelContext) else {
                 showDuplicateEventError()
-                return
+                return false
             }
 
-            try insertSavedEvent(event)
-            dismiss()
+            try insertSavedEvent(event, modelContext: modelContext)
+            return true
         } catch {
             showError(error.localizedDescription)
+            return false
         }
     }
 
-    private func insertSavedEvent(_ event: CrabFitEvent) throws {
+    private func insertSavedEvent(_ event: CrabFitEvent, modelContext: ModelContext) throws {
         modelContext.insert(SavedEvent(event: event))
         try modelContext.save()
     }
 
-    private func savedEventExists(eventID: String) throws -> Bool {
+    private func savedEventExists(eventID: String, modelContext: ModelContext) throws -> Bool {
         var descriptor = FetchDescriptor<SavedEvent>(
             predicate: #Predicate<SavedEvent> { savedEvent in
                 savedEvent.eventID == eventID
@@ -399,18 +249,6 @@ struct AddEventSheet: View {
         descriptor.includePendingChanges = true
 
         return try !modelContext.fetch(descriptor).isEmpty
-    }
-
-    private func weekdaySelectionBinding(for weekday: EventWeekday) -> Binding<Bool> {
-        Binding {
-            selectedWeekdays.contains(weekday)
-        } set: { isSelected in
-            if isSelected {
-                selectedWeekdays.insert(weekday)
-            } else {
-                selectedWeekdays.remove(weekday)
-            }
-        }
     }
 
     private func showDuplicateEventError() {
@@ -542,7 +380,7 @@ struct AddEventSheet: View {
         return year * 10_000 + month * 100 + day
     }
 
-    private static func formattedHour(_ hour: Int) -> String {
+    static func formattedHour(_ hour: Int) -> String {
         let period = hour < 12 ? "AM" : "PM"
         let hour12 = hour % 12 == 0 ? 12 : hour % 12
         return "\(hour12) \(period)"
@@ -573,7 +411,7 @@ struct AddEventSheet: View {
     }
 }
 
-private enum EventEntryMode: CaseIterable, Identifiable {
+enum EventEntryMode: CaseIterable, Identifiable, Sendable {
     case existing
     case create
 
@@ -598,7 +436,7 @@ private enum EventEntryMode: CaseIterable, Identifiable {
     }
 }
 
-private enum NewEventDateMode: CaseIterable, Identifiable {
+enum NewEventDateMode: CaseIterable, Identifiable, Sendable {
     case specificDates
     case weekdays
 
@@ -614,7 +452,7 @@ private enum NewEventDateMode: CaseIterable, Identifiable {
     }
 }
 
-private enum EventWeekday: CaseIterable, Identifiable {
+enum EventWeekday: CaseIterable, Identifiable, Sendable {
     case sunday
     case monday
     case tuesday
@@ -662,9 +500,4 @@ private enum EventWeekday: CaseIterable, Identifiable {
             6
         }
     }
-}
-
-#Preview {
-    AddEventSheet()
-        .modelContainer(for: SavedEvent.self, inMemory: true)
 }
