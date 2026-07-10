@@ -206,21 +206,25 @@ private final class FoundationModelAvailabilityParser {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
 
-        var selectedRawValues = Set<String>()
+        let includeRules = rules.filter(\.isInclude)
+        let excludeRules = rules.filter { !$0.isInclude }
+        var includedRawValues = includeRules.isEmpty ? Set(rangeSlots.map(\.rawValue)) : Set<String>()
+        var excludedRawValues = Set<String>()
 
-        for rule in rules {
-            for slot in rangeSlots where Self.rule(rule, matches: slot, calendar: calendar) {
-                switch rule.mode {
-                case .include:
-                    selectedRawValues.insert(slot.rawValue)
-                case .exclude:
-                    selectedRawValues.remove(slot.rawValue)
-                }
+        for rule in includeRules {
+            for slot in rangeSlots where Self.rule(rule, contains: slot, calendar: calendar) {
+                includedRawValues.insert(slot.rawValue)
+            }
+        }
+
+        for rule in excludeRules {
+            for slot in rangeSlots where Self.rule(rule, overlaps: slot, calendar: calendar) {
+                excludedRawValues.insert(slot.rawValue)
             }
         }
 
         let selectedSlots = rangeSlots
-            .filter { selectedRawValues.contains($0.rawValue) }
+            .filter { includedRawValues.contains($0.rawValue) && !excludedRawValues.contains($0.rawValue) }
             .sorted { firstSlot, secondSlot in
                 firstSlot.startSortValue < secondSlot.startSortValue
             }
@@ -268,13 +272,28 @@ private final class FoundationModelAvailabilityParser {
 
     private static func rule(
         _ rule: AvailabilityRule,
-        matches slot: AvailabilityRangeSlot,
+        contains slot: AvailabilityRangeSlot,
         calendar: Calendar
     ) -> Bool {
         guard let localSlot = LocalAvailabilitySlot(slot: slot, calendar: calendar),
               rule.target.matches(localSlot),
               localSlot.startMinute >= rule.startMinute,
               localSlot.endMinute <= rule.endMinute else {
+            return false
+        }
+
+        return true
+    }
+
+    private static func rule(
+        _ rule: AvailabilityRule,
+        overlaps slot: AvailabilityRangeSlot,
+        calendar: Calendar
+    ) -> Bool {
+        guard let localSlot = LocalAvailabilitySlot(slot: slot, calendar: calendar),
+              rule.target.matches(localSlot),
+              localSlot.startMinute < rule.endMinute,
+              localSlot.endMinute > rule.startMinute else {
             return false
         }
 
